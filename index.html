@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+  <style>
+    .container {
+      width: 1000px;
+      display: flex;
+    }
+
+    body {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #tooltip {
+      position: absolute;
+      border: 1px solid black;
+      padding: 0.5em;
+      background-color: antiquewhite;
+      opacity: 0%;
+    }
+
+    #title {
+      margin: 0;
+    }
+
+    svg {
+      position: relative;
+      z-index: 1;
+
+    }
+
+    #tooltip h1 {
+      font-size: 1em;
+      font-weight: normal;
+    }
+
+    body>h2 {
+      font-size: 1em;
+    }
+
+    #legend {
+      position: absolute;
+      margin: 0 auto;
+      top: 2.5em;
+    }
+  </style>
+</head>
+
+<body>
+  <h1 id="title">United States Educational Attainment</h1>
+  </h2>
+  <div id='tooltip'></div>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+  <script src="https://cdn.freecodecamp.org/testable-projects-fcc/v1/bundle.js"></script>
+  <script>
+    Promise.all([
+      fetch('https://cdn.freecodecamp.org/testable-projects-fcc/data/choropleth_map/for_user_education.json')
+        .then(res => res.json()),
+      fetch('https://cdn.freecodecamp.org/testable-projects-fcc/data/choropleth_map/counties.json')
+        .then(res => res.json())
+    ])
+      .then(arr => {
+        // console.log(arr[0], arr[1])
+        main(arr)
+      })
+
+    function main(arr) {
+
+      let edu = arr[0] //教育数据
+      let us = arr[1] //地理数据，初始时topojson格式，需转换为geojson格式
+
+      console.log(edu[0])
+
+
+      let width = 960
+      let height = 600
+      let p = 0
+      let w = width - 2 * p
+      let h = height - 2 * p
+
+      const path = d3.geoPath(); //用geopath函数生成path
+
+
+       //颜色比例尺
+      //sequentialQuantile先将所有原始数据转换为quantile（[0, 1])，最小值对应0%，最大值对应100%，然后再使用interpolate函数来转换value，所以是归类为sequential的
+      //但是后续的值仍然需要传入domain设定的数据，中间的转换是自动的
+      let color = d3.scaleSequentialQuantile(
+        edu.map(e => e.bachelorsOrHigher), // domain
+        d3.interpolateBlues //interpolate function
+      )
+      window.color = color
+
+      legend(color, {title: `Percentage of adults age 25 and older with a bachelor's degree or higher (2010-2014)`})
+
+      let svgParent = d3.select('body').append('svg')
+        .attr('width', width)
+        .attr('height', height)
+
+      let svg = svgParent
+        .append('g')
+        .attr('width', w)
+        .attr('height', h)
+        .attr('transform', `translate(${p}, ${p})`)
+      // console.log(us)
+      let geojson = topojson.feature(us, us.objects.counties).features //用topojson.feature转换成geojson格式
+      console.log(geojson[0])
+
+      let data = {} //辅助的一个数据结构，用来方便查找对应关系，来实现数据的合并，实际后期只需geojson的数组
+
+      for (let obj of geojson) {
+        let id = obj['id']
+        data[id] = obj
+      }
+
+      for (let obj of edu) {
+        let id = obj['fips']
+        //注意在合并的过程中我们其实给geojson每一个对象都增添了新的属性，所以后期绑定的时候我们可以直接通过键值获取属性
+        Object.assign(data[id], obj)
+      }
+
+      // window.data = data
+      // console.log(data[5089])
+
+      let minLevel = 1000
+      let maxLevel = 0
+      for (let obj of edu) {
+        let level = obj['bachelorsOrHigher']
+        if (level < minLevel) {
+          minLevel = level
+        }
+        if (level > maxLevel) {
+          maxLevel = level
+        }
+      }
+
+      console.log(minLevel, maxLevel)
+      // console.log(edu.map(e => e.bachelorsOrHigher))
+
+     
+
+
+      let tooltip = d3.select('#tooltip')
+
+      //绘制县
+      svg.append('g')
+        .selectAll('path')
+        .data(geojson) //这里我们用的geojson格式的数据
+        .join('path')
+        .attr("d", path) //用geopath函数绘制，细节不用操心
+        // set the color of each country
+        .attr('fill', function (d, i) {
+          let level = d.bachelorsOrHigher
+          return color(level)
+        })
+        .attr('class', 'county')
+        .attr('data-fips', function(d,i) {return d.id})
+        .attr('data-education', function(d, i) {return d.bachelorsOrHigher})
+        .on('mouseover', (event, d) => {
+          // console.log(d)
+          tooltip
+            .attr('data-education', d.bachelorsOrHigher)
+            .style('opacity', '90%')
+            .style('z-index', 2) //调整z-index来避免遮罩的一系列问题
+            .style('left', event.pageX + 'px')
+            .style('top', event.pageY + 'px')
+            .html(`<h1>${d.area_name}, ${d.state}: ${d.bachelorsOrHigher.toFixed(1)}%</h1>`)
+
+        })
+        .on('mouseout', function (event, d) {
+          tooltip
+            .style('opacity', '0')
+            .style('z-index', 0) //调整z-index来避免遮罩的一系列问题
+        })
+
+      svg.append("path") //再添加州的边界，这样看上去更美观
+        .datum(topojson.mesh(us, us.objects.states, (a, b) => a !== b)) //这边是抄的，应该是topojson更加节省数据空间，可以将多条path合并
+        .attr("fill", "none")
+        .attr("stroke", "white")
+        .attr("stroke-linejoin", "round")
+        .attr("d", d3.geoPath());
+
+
+      //legend，由于我们采用渐变的颜色样条，所以我们用canvas绘制来避免过多内存占用
+      function legend(color, { //object destructuring with default value!
+        title,
+        tickSize = 6,
+        width = 320,
+        height = 44 + tickSize,
+        marginTop = 18,
+        marginRight = 0,
+        marginBottom = 16 + tickSize,
+        marginLeft = 0,
+        ticks = width / 64,
+        tickFormat,
+        tickValues
+      } = {}) {
+
+        function ramp(color, n = 256) {
+          const canvas = document.createElement("canvas");
+          canvas.width = n;
+          canvas.height = 1;
+          const context = canvas.getContext("2d");
+          for (let i = 0; i < n; ++i) {
+            context.fillStyle = color(i / (n - 1));
+            context.fillRect(i, 0, 1, 1);
+          }
+          return canvas;
+        }
+
+        const svg = d3.select('body').append("svg")
+          .attr("width", width)
+          .attr("height", height)
+          .attr('id', 'legend')
+          .attr("viewBox", [0, 0, width, height])
+          .style("overflow", "visible")
+          .style("display", "block");
+
+        let tickAdjust = g => g.selectAll(".tick line").attr("y1", marginTop + marginBottom - height);
+
+
+        window.color2 = color.interpolator()
+
+        svg.append("image") //在svg里嵌入图片，通过ramp函数生成
+          .attr("x", marginLeft)
+          .attr("y", marginTop)
+          .attr("width", width - marginLeft - marginRight)
+          .attr("height", height - marginTop - marginBottom)
+          .attr("preserveAspectRatio", "none") //这里让图片自动去填充长和宽，我们生成的图片原始自由1像素的高
+          //注意这里我们传入的是color.interpolator而不是color，所以可以接受[0,1]的domain！
+          .attr("xlink:href", ramp(color.interpolator()).toDataURL());
+
+
+        //x的比例尺输入实际数据，得到像素距离，注意其跟color一样都不是简单的线性变换，而是基于percentile的
+        let x = Object.assign(color.copy()
+          .interpolator(d3.interpolateRound(marginLeft, width - marginRight)),
+          { range() { return [marginLeft, width - marginRight]; } });
+
+        
+
+        const n = Math.round(ticks + 1);
+        //注意使用的是quantile， 不是scaleQuantile, quantile返回指定quantile的数据“刻度”
+        tickValues = d3.range(n).map(i => d3.quantile(color.domain(), i / (n - 1)));
+        tickFormat = d3.format(tickFormat === undefined ? ".1f" : tickFormat);
+
+        svg.append("g")
+          .attr("transform", `translate(0, ${height - marginBottom})`)
+          .call(d3.axisBottom(x)
+            .ticks(ticks, undefined)
+            .tickFormat(function(d) {return tickFormat(d) + "%"})
+            .tickSize(tickSize)
+            .tickValues(tickValues))
+          .call(tickAdjust)
+          .call(g => g.select(".domain").remove())
+          .call(g => g.append("text")
+            .attr("x", marginLeft)
+            .attr("y", marginTop + marginBottom - height - 6)
+            .attr("fill", "currentColor")
+            .attr("text-anchor", "start")
+            .attr("font-weight", "bold")
+            .attr("id", "description")
+            .text(title)
+          )
+
+        return svg;
+      }
+
+      
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    }
+
+  </script>
+</body>
+
+</html>
